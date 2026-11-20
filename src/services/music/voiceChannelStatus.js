@@ -5,7 +5,7 @@ const MAX_STATUS_LENGTH = 500;
 function formatTrackStatus(track) {
     const title = String(track?.info?.title || 'Unknown track').replace(/\s+/g, ' ').trim();
     const artist = String(track?.info?.author || 'Unknown artist').replace(/\s+/g, ' ').trim().toLowerCase();
-    return `<a:cd1:1573219932575899738>  **${title}** — ${artist}`.slice(0, MAX_STATUS_LENGTH);
+    return `**${title}** — ${artist}`.slice(0, MAX_STATUS_LENGTH);
 }
 
 export async function setVoiceChannelMusicStatus(client, channelId, track = null) {
