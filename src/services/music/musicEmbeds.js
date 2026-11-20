@@ -1,4 +1,9 @@
-import { ActionRowBuilder, ButtonBuilder, ButtonStyle } from 'discord.js';
+import {
+    ActionRowBuilder,
+    ButtonBuilder,
+    ButtonStyle,
+    StringSelectMenuBuilder,
+} from 'discord.js';
 import { createEmbed } from '../../utils/embeds.js';
 import { getPaginationRow } from '../../utils/components.js';
 
@@ -8,6 +13,7 @@ export const MUSIC_BUTTON_IDS = {
     PAUSE: 'music_pause',
     RESUME: 'music_resume',
     SKIP: 'music_skip',
+    PREVIOUS: 'music_previous',
     STOP: 'music_stop',
     SHUFFLE: 'music_shuffle',
     LOOP: 'music_loop',
@@ -18,10 +24,12 @@ export const MUSIC_BUTTON_IDS = {
     QUEUE_PREV: 'music_queue_prev',
     QUEUE_NEXT: 'music_queue_next',
     QUEUE_LAST: 'music_queue_last',
+    AUTOPLAY: 'music_autoplay',
+    UP_NEXT: 'music_up_next',
 };
 
 export function formatDuration(ms) {
-    if (!ms || Number.isNaN(ms)) {
+    if (ms === null || ms === undefined || Number.isNaN(ms)) {
         return 'Live';
     }
     const totalSeconds = Math.floor(ms / 1000);
@@ -49,7 +57,7 @@ function getLoopLabel(loop) {
     }
 }
 
-export function buildNowPlayingEmbed(track, player, guildData) {
+export function buildNowPlayingEmbed(track, player, guildData, guildName = null) {
     const requester = track?.info?.requester;
     const requesterLabel = requester
         ? (requester.username || requester.tag || 'Unknown')
@@ -58,17 +66,28 @@ export function buildNowPlayingEmbed(track, player, guildData) {
     const position = formatDuration(player?.position || 0);
     const duration = formatDuration(track?.info?.length || 0);
 
+    const title = track?.info?.title || 'Unknown track';
+    const uri = track?.info?.uri;
+    const linkedTitle = uri ? `[${title}](${uri})` : title;
+    const source = track?.info?.sourceName
+        ? `${track.info.sourceName.charAt(0).toUpperCase()}${track.info.sourceName.slice(1)}`
+        : 'Music';
+
     return createEmbed({
-        title: 'Now Playing',
-        description: track?.info?.title || 'Unknown track',
+        title: `Now Playing${guildName ? ` - ${guildName}` : ''}`,
+        description: [
+            `**${linkedTitle}**`,
+            '',
+            `👤 **${track?.info?.author || 'Unknown artist'}** · ⏱️ ${position} / ${duration}`,
+            `💿 ${source} · Requested by **${requesterLabel}**`,
+        ].join('\n'),
         color: 'primary',
         fields: [
-            { name: 'Artist', value: track?.info?.author || 'Unknown', inline: true },
-            { name: 'Requester', value: requesterLabel, inline: true },
-            { name: 'Progress', value: `${position} / ${duration}`, inline: true },
-            { name: 'Volume', value: `${guildData?.volume ?? 75}%`, inline: true },
-            { name: 'Loop', value: getLoopLabel(guildData?.loop), inline: true },
-            { name: 'Queue', value: `${player?.queue?.length || 0} track(s)`, inline: true },
+            {
+                name: 'Playback',
+                value: `${player?.queue?.length || 0} queued · Loop ${getLoopLabel(guildData?.loop)} · Autoplay ${guildData?.autoplay ? 'On' : 'Off'}`,
+                inline: false,
+            },
         ],
         thumbnail: getTrackArtwork(track),
         footer: player?.paused ? 'Paused' : 'Playing',
@@ -108,34 +127,43 @@ export function buildQueueEmbed(queue, currentTrack, page = 0) {
 
 export function buildPlayerButtonRows(player, guildData) {
     const paused = player?.paused;
+    const queuedTracks = player?.queue?.slice(0, 25) || [];
+    const upNextMenu = new StringSelectMenuBuilder()
+        .setCustomId(MUSIC_BUTTON_IDS.UP_NEXT)
+        .setPlaceholder(queuedTracks.length ? 'Up Next · choose a track' : 'Queue is empty')
+        .setDisabled(queuedTracks.length === 0)
+        .addOptions(
+            queuedTracks.length
+                ? queuedTracks.map((track, index) => ({
+                    label: `${index + 1}. ${track.info?.title || 'Unknown track'}`.slice(0, 100),
+                    description: (track.info?.author || 'Unknown artist').slice(0, 100),
+                    value: String(index),
+                }))
+                : [{ label: 'Queue is empty', value: 'none' }],
+        );
+
     const row1 = new ActionRowBuilder().addComponents(
         new ButtonBuilder()
-            .setCustomId(MUSIC_BUTTON_IDS.PAUSE)
-            .setLabel('Pause')
-            .setStyle(ButtonStyle.Primary)
-            .setEmoji('⏸️')
-            .setDisabled(Boolean(paused)),
-        new ButtonBuilder()
-            .setCustomId(MUSIC_BUTTON_IDS.RESUME)
-            .setLabel('Resume')
-            .setStyle(ButtonStyle.Success)
-            .setEmoji('▶️')
-            .setDisabled(!paused),
+            .setCustomId(paused ? MUSIC_BUTTON_IDS.RESUME : MUSIC_BUTTON_IDS.PAUSE)
+            .setLabel(paused ? 'Resume' : 'Pause')
+            .setStyle(ButtonStyle.Secondary)
+            .setEmoji(paused ? '▶️' : '⏸️'),
         new ButtonBuilder()
             .setCustomId(MUSIC_BUTTON_IDS.SKIP)
             .setLabel('Skip')
-            .setStyle(ButtonStyle.Secondary)
+            .setStyle(ButtonStyle.Primary)
             .setEmoji('⏭️'),
         new ButtonBuilder()
-            .setCustomId(MUSIC_BUTTON_IDS.STOP)
-            .setLabel('Stop')
-            .setStyle(ButtonStyle.Danger)
-            .setEmoji('⏹️'),
+            .setCustomId(MUSIC_BUTTON_IDS.PREVIOUS)
+            .setLabel('Previous')
+            .setStyle(ButtonStyle.Secondary)
+            .setEmoji('⏮️')
+            .setDisabled(!player?.previous),
         new ButtonBuilder()
-            .setCustomId(MUSIC_BUTTON_IDS.SHUFFLE)
-            .setLabel('Shuffle')
-            .setStyle(guildData?.shuffle ? ButtonStyle.Success : ButtonStyle.Secondary)
-            .setEmoji('🔀'),
+            .setCustomId(MUSIC_BUTTON_IDS.QUEUE)
+            .setLabel('Queue')
+            .setStyle(ButtonStyle.Secondary)
+            .setEmoji('➕'),
     );
 
     const row2 = new ActionRowBuilder().addComponents(
@@ -145,23 +173,19 @@ export function buildPlayerButtonRows(player, guildData) {
             .setStyle(guildData?.loop !== 'none' ? ButtonStyle.Success : ButtonStyle.Secondary)
             .setEmoji('🔁'),
         new ButtonBuilder()
-            .setCustomId(MUSIC_BUTTON_IDS.VOL_DOWN)
-            .setLabel('Vol -')
-            .setStyle(ButtonStyle.Secondary)
-            .setEmoji('🔉'),
+            .setCustomId(MUSIC_BUTTON_IDS.AUTOPLAY)
+            .setLabel(`Autoplay ${guildData?.autoplay ? 'On' : 'Off'}`)
+            .setStyle(guildData?.autoplay ? ButtonStyle.Success : ButtonStyle.Secondary)
+            .setEmoji('🔀'),
         new ButtonBuilder()
-            .setCustomId(MUSIC_BUTTON_IDS.VOL_UP)
-            .setLabel('Vol +')
-            .setStyle(ButtonStyle.Secondary)
-            .setEmoji('🔊'),
-        new ButtonBuilder()
-            .setCustomId(MUSIC_BUTTON_IDS.QUEUE)
-            .setLabel('Queue')
-            .setStyle(ButtonStyle.Secondary)
-            .setEmoji('📋'),
+            .setCustomId(MUSIC_BUTTON_IDS.STOP)
+            .setLabel('End Session')
+            .setStyle(ButtonStyle.Danger)
+            .setEmoji('⏹️'),
     );
 
-    return [row1, row2];
+    const selectRow = new ActionRowBuilder().addComponents(upNextMenu);
+    return [selectRow, row1, row2];
 }
 
 export function buildQueuePaginationRow(page, totalPages) {

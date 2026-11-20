@@ -526,8 +526,9 @@ export function buildNowPlayingReply(client, guildId) {
         throw new TitanBotError('No player', ErrorTypes.USER_INPUT, 'Nothing is playing right now.');
     }
     const guildData = getGuildMusicData(guildId);
+    const guildName = client.guilds.cache.get(guildId)?.name;
     return {
-        embeds: [buildNowPlayingEmbed(player.current, player, guildData)],
+        embeds: [buildNowPlayingEmbed(player.current, player, guildData, guildName)],
     };
 }
 

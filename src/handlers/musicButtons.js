@@ -107,8 +107,23 @@ async function handleMusicButton(interaction, client) {
                 }
                 player.stop();
                 break;
+            case MUSIC_BUTTON_IDS.PREVIOUS: {
+                const previousTrack = player.previous;
+                if (!previousTrack) {
+                    return interaction.followUp({
+                        content: 'There is no previous track in this session.',
+                        flags: MessageFlags.Ephemeral,
+                    }).catch(() => {});
+                }
+                player.queue.unshift(previousTrack);
+                if (player.loop === 'track') {
+                    player.setLoop('none');
+                }
+                player.stop();
+                break;
+            }
             case MUSIC_BUTTON_IDS.STOP:
-                await destroyPlayerSession(client, interaction.guild.id, player, guildData);
+                await destroyPlayerSession(client, interaction.guild.id, player, guildData, { forceDisconnect: true });
                 break;
             case MUSIC_BUTTON_IDS.SHUFFLE:
                 if (player.queue.length > 0) {
@@ -123,6 +138,10 @@ async function handleMusicButton(interaction, client) {
                 await setLoopMode(client, interaction, next);
                 break;
             }
+            case MUSIC_BUTTON_IDS.AUTOPLAY:
+                guildData.autoplay = !guildData.autoplay;
+                await refreshPlayerMessage(client, interaction.guild.id);
+                break;
             case MUSIC_BUTTON_IDS.VOL_DOWN:
                 guildData.volume = Math.max(0, guildData.volume - 10);
                 player.setVolume(guildData.volume);
