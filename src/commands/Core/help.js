@@ -18,8 +18,7 @@ const __dirname = path.dirname(__filename);
 
 const CATEGORY_SELECT_ID = "help-category-select";
 const ALL_COMMANDS_ID = "help-all-commands";
-const BUG_REPORT_BUTTON_ID = "help-bug-report";
-const HELP_MENU_TIMEOUT_MS = 5 * 60 * 1000;
+const SUPPORT_SERVER_URL = "https://discord.gg/wmxB2qgUBQ";
 
 const CATEGORY_ICONS = {
     Core: "ℹ️",
@@ -83,11 +82,6 @@ export async function createInitialHelpMenu(client) {
                 ].join('\n'),
                 inline: false,
             },
-            {
-                name: '\u200B',
-                value: `-# ${botName} is [open source](https://youtu.be/1jCZX8s3bJE?si=NPOYx-vxVE1I5vJK)`,
-                inline: false,
-            },
         ],
     });
 
@@ -97,13 +91,13 @@ export async function createInitialHelpMenu(client) {
     embed.setTimestamp();
 
     const bugReportButton = new ButtonBuilder()
-        .setCustomId(BUG_REPORT_BUTTON_ID)
         .setLabel("Report Bug")
-        .setStyle(ButtonStyle.Danger);
+        .setStyle(ButtonStyle.Link)
+        .setURL(SUPPORT_SERVER_URL);
 
     const supportButton = new ButtonBuilder()
         .setLabel("Support Server")
-        .setURL("https://discord.gg/QnWNz2dKCE")
+        .setURL(SUPPORT_SERVER_URL)
         .setStyle(ButtonStyle.Link);
 
     const selectRow = createSelectMenu(
@@ -130,8 +124,6 @@ export default {
         .setDescription("Displays the help menu with all available commands"),
 
     async execute(interaction, guildConfig, client) {
-        
-        const { MessageFlags } = await import('discord.js');
         await InteractionHelper.safeDefer(interaction);
         
         const { embeds, components } = await createInitialHelpMenu(client);
@@ -140,26 +132,5 @@ export default {
             embeds,
             components,
         });
-
-        setTimeout(async () => {
-            try {
-                if (!InteractionHelper.isInteractionValid(interaction)) {
-                    return;
-                }
-
-                const closedEmbed = createEmbed({
-                    title: "Help menu closed",
-                    description: "Help menu has been closed, use /help again.",
-                    color: "secondary",
-                });
-
-                await InteractionHelper.safeEditReply(interaction, {
-                    embeds: [closedEmbed],
-                    components: [],
-                });
-            } catch (error) {
-                logger.debug('Help menu close edit failed (interaction may have expired):', error?.message);
-            }
-        }, HELP_MENU_TIMEOUT_MS);
     },
 };

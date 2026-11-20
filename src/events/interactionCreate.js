@@ -88,7 +88,11 @@ export default {
             }
 
             const defaultCooldownSec = Number(botConfig.commands?.defaultCooldown) || 0;
-            if (defaultCooldownSec > 0 && !isBotOwner(interaction.user.id)) {
+            if (
+              defaultCooldownSec > 0
+              && interaction.commandName !== 'help'
+              && !isBotOwner(interaction.user.id)
+            ) {
               const cooldownKey = `${interaction.user.id}:${interaction.commandName}`;
               const expiresAt = client.cooldowns.get(cooldownKey);
 
