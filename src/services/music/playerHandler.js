@@ -6,6 +6,7 @@ import {
     buildNowPlayingEmbed,
     buildPlayerButtonRows,
 } from './musicEmbeds.js';
+import { setVoiceChannelMusicStatus } from './voiceChannelStatus.js';
 
 const UPDATE_INTERVAL_MS = 15 * 1000;
 const IDLE_DISCONNECT_MS = 30 * 1000;
@@ -147,7 +148,10 @@ export function setupPlayerHandler(client) {
             const embed = buildNowPlayingEmbed(track, player, guildData, guildName);
             const components = buildPlayerButtonRows(player, guildData);
             const channelId = guildData.playerChannelId || player.textChannel;
-            await editOrSendPlayerMessage(client, guildData, channelId, embed, components);
+            await Promise.all([
+                editOrSendPlayerMessage(client, guildData, channelId, embed, components),
+                setVoiceChannelMusicStatus(client, player.voiceChannel, track),
+            ]);
             startUpdateInterval(client, player.guildId);
         } catch (error) {
             logger.error('Music trackStart error:', error);
@@ -163,6 +167,8 @@ export function setupPlayerHandler(client) {
                 player.autoplay(player);
                 return;
             }
+
+            await setVoiceChannelMusicStatus(client, player.voiceChannel);
 
             if (guildData.playerMessageId && guildData.playerChannelId) {
                 try {
@@ -202,6 +208,7 @@ export function setupPlayerHandler(client) {
     client.riffy.on('playerDisconnect', async (player) => {
         const guildData = getGuildMusicData(player.guildId);
         clearUpdateInterval(guildData);
+        await setVoiceChannelMusicStatus(client, player.voiceChannel);
 
         if (guildData.playerMessageId && guildData.playerChannelId) {
             try {
