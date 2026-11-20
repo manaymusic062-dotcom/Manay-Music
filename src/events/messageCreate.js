@@ -10,7 +10,21 @@ import { enforceAbuseProtection, formatCooldownDuration } from '../utils/abusePr
 import { createEmbed } from '../utils/embeds.js';
 import { isCommandEnabled } from '../services/commandAccessService.js';
 
-const MUSIC_PREFIX_SHORTCUTS = new Set(['leave', 'pause', 'resume', 'skip', 'stop', 'volume']);
+const MUSIC_PREFIX_SHORTCUTS = new Set([
+  'pause',
+  'resume',
+  'skip',
+  'stop',
+  'shuffle',
+  'loop',
+  'volume',
+  'seek',
+  'remove',
+  'move',
+  'clear',
+  'leave',
+  '247',
+]);
 
 export default {
   name: Events.MessageCreate,

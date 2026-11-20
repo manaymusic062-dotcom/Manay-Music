@@ -145,11 +145,21 @@ export function mapArgumentsToOptions(args, commandData) {
     optionDefs = cmdData.options.filter((opt) => opt.type !== 1 && opt.type !== 2);
   }
 
-  for (let i = 0; i < Math.min(currentArgs.length, optionDefs.length); i++) {
-    const optionDef = optionDefs[i];
-    const value = currentArgs[i];
-    
-    options[optionDef.name] = value;
+  const joinsRemainingAsString =
+    !hasSubcommands
+    && !subcommandGroup
+    && optionDefs.length === 1
+    && optionDefs[0].type === 3;
+
+  if (joinsRemainingAsString && currentArgs.length > 0) {
+    options[optionDefs[0].name] = currentArgs.join(' ');
+  } else {
+    for (let i = 0; i < Math.min(currentArgs.length, optionDefs.length); i++) {
+      const optionDef = optionDefs[i];
+      const value = currentArgs[i];
+
+      options[optionDef.name] = value;
+    }
   }
 
   const missing = [];
