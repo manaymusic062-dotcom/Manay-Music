@@ -2,7 +2,7 @@
 
 import { pgDb } from './postgresDatabase.js';
 import { logger } from './logger.js';
-import { BotConfig, getDefaultApplicationQuestions } from '../config/bot.js';
+import { BotConfig } from '../config/bot.js';
 
 export {
     db,
@@ -211,130 +211,6 @@ export function getMonthName(monthNum) {
     ];
     const index = Math.max(0, Math.min(monthNum - 1, 11));
     return monthNum >= 1 && monthNum <= 12 ? months[index] : 'Invalid Month';
-}
-
-function isPostgresSqlReady(dbWrapper) {
-    return Boolean(
-        dbWrapper?.db?.pool &&
-        typeof dbWrapper.db.isAvailable === 'function' &&
-        dbWrapper.db.isAvailable(),
-    );
-}
-
-async function getEndedGiveawaysFromKv(client) {
-    const wrapper = client?.db;
-    if (!wrapper || typeof wrapper.list !== 'function' || typeof wrapper.get !== 'function') {
-        return [];
-    }
-
-    const keys = await wrapper.list('guild:');
-    const ended = [];
-    const now = Date.now();
-
-    for (const key of keys) {
-        if (!key.endsWith(':giveaways')) {
-            continue;
-        }
-
-        const guildId = key.split(':')[1];
-        if (!guildId) {
-            continue;
-        }
-
-        const rawGiveaways = await wrapper.get(key, {});
-        const unwrapped = unwrapReplitData(rawGiveaways) || {};
-        const giveaways = Array.isArray(unwrapped) ? unwrapped : Object.values(unwrapped);
-
-        for (const giveaway of giveaways) {
-            if (!giveaway?.messageId || giveaway.ended || giveaway.isEnded) {
-                continue;
-            }
-
-            const endTime = giveaway.endsAt || giveaway.endTime;
-            if (!endTime || now < Number(endTime)) {
-                continue;
-            }
-
-            ended.push({
-                id: giveaway.id || giveaway.messageId,
-                guild_id: guildId,
-                message_id: giveaway.messageId,
-                data: giveaway,
-                ends_at: new Date(Number(endTime)),
-            });
-        }
-    }
-
-    return ended.sort((a, b) => new Date(a.ends_at) - new Date(b.ends_at));
-}
-
-export async function getEndedGiveaways(client) {
-    try {
-        const wrapper = client?.db;
-        if (!wrapper || typeof wrapper.get !== 'function') {
-            return [];
-        }
-
-        if (isPostgresSqlReady(wrapper)) {
-            const { pgConfig } = await import('../config/database/postgres.js');
-
-            const result = await wrapper.db.pool.query(
-                `SELECT id, guild_id, message_id, data, ends_at 
-                 FROM ${pgConfig.tables.giveaways} 
-                 WHERE ends_at <= NOW() 
-                 AND COALESCE((data->>'ended')::boolean, false) = false
-                 ORDER BY ends_at ASC`,
-            );
-
-            return result.rows || [];
-        }
-
-        if (wrapper.isDegraded?.()) {
-            logger.debug('Postgres SQL unavailable for ended giveaways; scanning key-value store');
-        }
-
-        return await getEndedGiveawaysFromKv(client);
-    } catch (error) {
-        logger.error('Error getting ended giveaways:', error);
-        try {
-            return await getEndedGiveawaysFromKv(client);
-        } catch {
-            return [];
-        }
-    }
-}
-
-export async function markGiveawayEnded(client, giveawayId, endedData) {
-    try {
-        const wrapper = client?.db;
-        if (!wrapper || typeof wrapper.get !== 'function') {
-            return false;
-        }
-
-        if (isPostgresSqlReady(wrapper)) {
-            const { pgConfig } = await import('../config/database/postgres.js');
-
-            await wrapper.db.pool.query(
-                `UPDATE ${pgConfig.tables.giveaways} 
-                 SET data = $1, updated_at = NOW() 
-                 WHERE id = $2`,
-                [endedData, giveawayId],
-            );
-
-            return true;
-        }
-
-        const guildId = endedData?.guildId;
-        if (!guildId || !endedData?.messageId) {
-            return false;
-        }
-
-        const { saveGiveaway } = await import('./giveaways.js');
-        return saveGiveaway(client, guildId, endedData);
-    } catch (error) {
-        logger.error('Error marking giveaway as ended:', error);
-        return false;
-    }
 }
 
 function normalizeWelcomeConfig(raw = {}) {
@@ -636,7 +512,7 @@ function buildApplicationSettingsDefaults() {
         enabled: false,
         applicationChannelId: null,
         logChannelId: null,
-        questions: getDefaultApplicationQuestions(),
+        questions: [],
         roles: {
             admin: null,
             reviewer: null,
