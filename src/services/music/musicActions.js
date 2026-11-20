@@ -552,7 +552,7 @@ export function buildQueueReply(client, guildId, page = 0) {
 
 export async function destroyPlayerSession(client, guildId, player, guildData, { forceDisconnect = false } = {}) {
     clearUpdateInterval(guildData);
-    await setVoiceChannelMusicStatus(client, player?.voiceChannel);
+    setVoiceChannelMusicStatus(client, player?.voiceChannel).catch(() => {});
     if (guildData.idleTimeout) {
         clearTimeout(guildData.idleTimeout);
         guildData.idleTimeout = null;

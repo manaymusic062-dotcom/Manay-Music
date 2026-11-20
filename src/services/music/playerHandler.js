@@ -126,6 +126,10 @@ export function setupPlayerHandler(client) {
         try {
             const guildData = getGuildMusicData(player.guildId);
 
+            // Fire voice-channel status immediately — no await so the player
+            // embed never waits on Discord's voice-status REST call.
+            setVoiceChannelMusicStatus(client, player.voiceChannel, track).catch(() => {});
+
             // Keep the Lavalink player's loop mode aligned with the stored preference.
             // Skip temporarily clears track-loop so it can advance; restore it here.
             if (guildData.loop && player.loop !== guildData.loop) {
@@ -148,10 +152,7 @@ export function setupPlayerHandler(client) {
             const embed = buildNowPlayingEmbed(track, player, guildData, guildName);
             const components = buildPlayerButtonRows(player, guildData);
             const channelId = guildData.playerChannelId || player.textChannel;
-            await Promise.all([
-                editOrSendPlayerMessage(client, guildData, channelId, embed, components),
-                setVoiceChannelMusicStatus(client, player.voiceChannel, track),
-            ]);
+            await editOrSendPlayerMessage(client, guildData, channelId, embed, components);
             startUpdateInterval(client, player.guildId);
         } catch (error) {
             logger.error('Music trackStart error:', error);
@@ -168,7 +169,7 @@ export function setupPlayerHandler(client) {
                 return;
             }
 
-            await setVoiceChannelMusicStatus(client, player.voiceChannel);
+            setVoiceChannelMusicStatus(client, player.voiceChannel).catch(() => {});
 
             if (guildData.playerMessageId && guildData.playerChannelId) {
                 try {
@@ -208,7 +209,7 @@ export function setupPlayerHandler(client) {
     client.riffy.on('playerDisconnect', async (player) => {
         const guildData = getGuildMusicData(player.guildId);
         clearUpdateInterval(guildData);
-        await setVoiceChannelMusicStatus(client, player.voiceChannel);
+        setVoiceChannelMusicStatus(client, player.voiceChannel).catch(() => {});
 
         if (guildData.playerMessageId && guildData.playerChannelId) {
             try {
