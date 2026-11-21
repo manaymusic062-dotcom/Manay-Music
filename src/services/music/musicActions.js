@@ -1,4 +1,3 @@
-import { once } from 'node:events';
 import { MessageFlags, PermissionFlagsBits } from 'discord.js';
 import { successEmbed } from '../../utils/embeds.js';
 import { InteractionHelper } from '../../utils/interactionHelper.js';
@@ -16,7 +15,6 @@ import { refreshPlayerMessage } from './playerHandler.js';
 import { setVoiceChannelMusicStatus } from './voiceChannelStatus.js';
 
 const YOUTUBE_URL_PATTERN = /(?:youtube\.com|youtu\.be)/i;
-const PLAYER_CONNECT_TIMEOUT_MS = 8_000;
 
 function getConnectedLavalinkNodes(client) {
     if (!client.riffy?.nodeMap) {
@@ -54,40 +52,7 @@ function assertBotVoicePermissions(channel) {
     }
 }
 
-async function waitForPlayerConnection(player) {
-    if (player.connected) {
-        return;
-    }
-
-    try {
-        await player.connection.resolve();
-    } catch {
-        // Fall through to event-based wait below.
-    }
-
-    if (player.connected) {
-        return;
-    }
-
-    try {
-        await once(player, 'connectionRestored', {
-            signal: AbortSignal.timeout(PLAYER_CONNECT_TIMEOUT_MS),
-        });
-    } catch {
-        // Timed out waiting for Lavalink to confirm the voice session.
-    }
-
-    if (!player.connected) {
-        throw new TitanBotError(
-            'Voice connection failed',
-            ErrorTypes.CONFIGURATION,
-            'Could not connect to the voice channel. Ensure Lavalink is online, the bot has Connect and Speak permissions, then try again.',
-        );
-    }
-}
-
 async function startPlayback(player) {
-    await waitForPlayerConnection(player);
     await player.play();
 }
 
@@ -205,17 +170,12 @@ export async function playQuery(client, interaction, query) {
         );
     }
 
-    const { player, guildData } = await ensurePlayer(client, interaction);
+    const { player } = await ensurePlayer(client, interaction);
 
-    // Resolve the track while the voice connection is being confirmed.
-    // Nothing enters the queue until both operations succeed.
-    const [result] = await Promise.all([
-        client.riffy.resolve({
-            query,
-            requester: interaction.user,
-        }),
-        waitForPlayerConnection(player),
-    ]);
+    const result = await client.riffy.resolve({
+        query,
+        requester: interaction.user,
+    });
 
     const { loadType, tracks, playlistInfo } = result;
 

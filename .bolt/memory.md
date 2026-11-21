@@ -3,8 +3,8 @@
 ## Product intent & audience
 
 - Discord music bot menggunakan perintah awalan (`!play`, dll).
-- Menggunakan PostgreSQL untuk menyimpan konfigurasi server.
-- Fitur pemutaran musik tidak memerlukan penulisan ke database.
+- PostgreSQL untuk menyimpan konfigurasi server; fitur pemutaran musik tidak butuh tulis DB.
+- Backend audio: Lavalink.
 
 ## Brand personality & voice
 
@@ -17,12 +17,15 @@
 
 ## Decisions, constraints & rationale
 
-- Konfigurasi server hanya dibaca sekali per perintah awalan; pembacaan kedua dihapus karena menyebabkan `!play` menunggu lama lalu menampilkan `DATABASE_ERROR`.
-- Kegagalan koneksi PostgreSQL tidak boleh diperlakukan sebagai error fatal untuk fitur musik yang tidak butuh database.
-- Waktu tunggu kegagalan koneksi harus singkat agar bot tetap responsif.
+- Konfigurasi server hanya dibaca sekali per perintah; pembacaan kedua dihapus karena menyebabkan `!play` menunggu lama lalu `DATABASE_ERROR`.
+- Kegagalan koneksi PostgreSQL tidak boleh fatal untuk fitur musik.
+- Waktu tunggu kegagalan koneksi harus singkat.
+- `!play` tidak boleh menunggu koneksi voice selesai sebelum mencari dan memutar lagu; Lavalink menerima perintah putar dan mulai otomatis begitu koneksi siap.
+- `waitForPlayerConnection` dihapus dari jalur play beserta fungsi/konstanta tak terpakai.
 
 ## Open questions & assumptions
 
-- Titik kegagalan pasti belum sepenuhnya dikonfirmasi: koneksi PostgreSQL vs penyimpanan status musik.
-- Format pesan error dan log lokal belum ditinjau secara mendalam.
+- Token Discord bot saat ini tidak valid; bot belum bisa online untuk verifikasi langsung.
+- Titik kegagalan pasti (koneksi PostgreSQL vs penyimpanan status musik) belum sepenuhnya dikonfirmasi.
+- Format pesan error dan log lokal belum ditinjau mendalam.
 - Detail konfigurasi/connection string PostgreSQL belum diketahui.
