@@ -16,7 +16,7 @@ import { refreshPlayerMessage } from './playerHandler.js';
 import { setVoiceChannelMusicStatus } from './voiceChannelStatus.js';
 
 const YOUTUBE_URL_PATTERN = /(?:youtube\.com|youtu\.be)/i;
-const PLAYER_CONNECT_TIMEOUT_MS = 12_000;
+const PLAYER_CONNECT_TIMEOUT_MS = 8_000;
 
 function getConnectedLavalinkNodes(client) {
     if (!client.riffy?.nodeMap) {
@@ -206,6 +206,11 @@ export async function playQuery(client, interaction, query) {
     }
 
     const { player, guildData } = await ensurePlayer(client, interaction);
+
+    // Verify the voice connection BEFORE adding any tracks to the queue.
+    // If this fails, the queue stays clean so the user can retry without
+    // hitting a false "already in the queue" error.
+    await waitForPlayerConnection(player);
 
     const result = await client.riffy.resolve({
         query,
