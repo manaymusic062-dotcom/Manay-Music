@@ -1,4 +1,5 @@
 import { MessageFlags, PermissionFlagsBits } from 'discord.js';
+import { logger } from '../../utils/logger.js';
 import { successEmbed } from '../../utils/embeds.js';
 import { InteractionHelper } from '../../utils/interactionHelper.js';
 import { botHasPermission } from '../../utils/permissionGuard.js';
@@ -52,8 +53,13 @@ function assertBotVoicePermissions(channel) {
     }
 }
 
-async function startPlayback(player) {
-    await player.play();
+function startPlayback(player) {
+    Promise.resolve().then(() => player.play()).catch((error) => {
+        logger.error('Lavalink playback start failed:', {
+            guildId: player.guildId,
+            error: error?.message || error,
+        });
+    });
 }
 
 export function getPlayer(client, guildId) {
