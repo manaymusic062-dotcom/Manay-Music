@@ -207,15 +207,15 @@ export async function playQuery(client, interaction, query) {
 
     const { player, guildData } = await ensurePlayer(client, interaction);
 
-    // Verify the voice connection BEFORE adding any tracks to the queue.
-    // If this fails, the queue stays clean so the user can retry without
-    // hitting a false "already in the queue" error.
-    await waitForPlayerConnection(player);
-
-    const result = await client.riffy.resolve({
-        query,
-        requester: interaction.user,
-    });
+    // Resolve the track while the voice connection is being confirmed.
+    // Nothing enters the queue until both operations succeed.
+    const [result] = await Promise.all([
+        client.riffy.resolve({
+            query,
+            requester: interaction.user,
+        }),
+        waitForPlayerConnection(player),
+    ]);
 
     const { loadType, tracks, playlistInfo } = result;
 

@@ -69,7 +69,7 @@ class PostgreSQLDatabase {
 
         for (let attempt = 1; attempt <= attempts; attempt += 1) {
             try {
-                await new Promise(resolve => setTimeout(resolve, 100));
+                await new Promise(resolve => setTimeout(resolve, 0));
 
                 this.pool = new pg.Pool(resolvePostgresPoolConfig());
 
