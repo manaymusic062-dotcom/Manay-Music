@@ -142,8 +142,8 @@ export function isCommandEnabledInConfig(config, commandName, category) {
   return true;
 }
 
-export async function isCommandEnabled(client, guildId, commandName, category = null) {
-  const config = await getGuildConfig(client, guildId);
+export async function isCommandEnabled(client, guildId, commandName, category = null, config = null) {
+  const resolvedConfig = config || await getGuildConfig(client, guildId);
   let resolvedCategory = category;
 
   if (!resolvedCategory) {
@@ -151,7 +151,7 @@ export async function isCommandEnabled(client, guildId, commandName, category = 
     resolvedCategory = command?.category || 'Core';
   }
 
-  return isCommandEnabledInConfig(config, commandName, resolvedCategory);
+  return isCommandEnabledInConfig(resolvedConfig, commandName, resolvedCategory);
 }
 
 export function getCommandAccessSnapshot(client, config) {
