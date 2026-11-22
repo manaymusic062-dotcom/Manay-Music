@@ -33,5 +33,11 @@
     "password": "heavencloud",
     "secure": true,
     "name": "Node-Singapura"
+  },
+  {
+   "host": "free-lava.heavencloud.in",
+   "port": 4000,
+   "password": "heavencloud.in",
+   "secure": false
   }
 ]
