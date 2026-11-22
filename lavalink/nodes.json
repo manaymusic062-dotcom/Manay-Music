@@ -39,5 +39,26 @@
    "port": 4000,
    "password": "heavencloud.in",
    "secure": false
+  },
+  {
+    "name": "NYX-Singapore-1",
+    "host": "sg1-nodelink.nyxbot.app",
+    "port": 3000,
+    "password": "nyxbot.app/support",
+    "secure": false
+  },
+  {
+    "name": "NYX-Singapore-SSL",
+    "host": "sg1-nodelink-ssl.nyxbot.app",
+    "port": 443,
+    "password": "nyxbot.app/support",
+    "secure": true
+  },
+  {
+    "name": "HeavenCloud-Asia",
+    "host": "free-lava.heavencloud.in",
+    "port": 4000,
+    "password": "heavencloud.in",
+    "secure": false
   }
 ]
