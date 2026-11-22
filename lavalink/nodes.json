@@ -26,5 +26,12 @@
     "password": "free",
     "secure": true,
     "name": "TriniumHost"
+  },
+  {
+    "host": "sg.lavalink.heavencloud.in",
+    "port": 443,
+    "password": "heavencloud",
+    "secure": true,
+    "name": "Node-Singapura"
   }
 ]
