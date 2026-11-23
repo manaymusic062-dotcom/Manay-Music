@@ -3,6 +3,12 @@ import { GatewayDispatchEvents } from 'discord.js';
 import { logger } from '../../utils/logger.js';
 import lavalinkConfig from '../../config/music/lavalink.js';
 import { setupPlayerHandler } from './playerHandler.js';
+import {
+    cleanupStaleVoiceSessions,
+    pickMigrationNode,
+    startAudioQualityWatchdog,
+    trackVoiceSocketClose,
+} from './voiceRecovery.js';
 
 const require = createRequire(import.meta.url);
 const { Riffy } = require('riffy');
@@ -35,9 +41,18 @@ export function initializeMusic(client) {
         bypassChecks: {
             nodeFetchInfo: true,
         },
+        // Public Lavalink nodes drop out often. By default Riffy removes a node for good
+        // after 3 failed reconnects and leaves its players stuck on the dead node.
+        // Keep retrying forever and move players to a healthy node instead.
+        reconnectTries: Number.MAX_SAFE_INTEGER,
+        reconnectTimeout: 10_000,
+        migrateOnDisconnect: true,
+        migrateOnFailure: true,
+        migrationStrategyFn: pickMigrationNode,
     });
 
     setupPlayerHandler(client);
+    trackVoiceSocketClose(client);
 
     client.on('raw', (packet) => {
         if (
@@ -48,7 +63,11 @@ export function initializeMusic(client) {
         ) {
             return;
         }
-        client.riffy.updateVoiceState(packet);
+        // updateVoiceState is async and can reject (e.g. Discord sends a voice server
+        // update without an endpoint while it reallocates the voice server).
+        Promise.resolve(client.riffy.updateVoiceState(packet)).catch((error) => {
+            logger.warn(`Voice update failed for guild ${packet.d?.guild_id}: ${error?.message || error}`);
+        });
     });
 
     client.riffy.on('playerError', (player, error) => {
@@ -62,5 +81,10 @@ export function initRiffyAfterReady(client) {
     if (client.riffy && client.user?.id) {
         client.riffy.init(client.user.id);
         logger.info('Riffy voice connection manager initialized.');
+
+        // After a restart Discord may still show the bot in a voice channel; clear it so
+        // the next /play gets fresh voice credentials instead of silently not playing.
+        cleanupStaleVoiceSessions(client);
+        startAudioQualityWatchdog(client);
     }
 }

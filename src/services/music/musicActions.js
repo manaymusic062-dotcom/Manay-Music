@@ -14,8 +14,25 @@ import {
 } from './musicEmbeds.js';
 import { refreshPlayerMessage } from './playerHandler.js';
 import { setVoiceChannelMusicStatus } from './voiceChannelStatus.js';
+import {
+    createMusicPlayer,
+    getBotVoiceChannelId,
+    isPlayerStale,
+    markNodeBad,
+    safeDestroyPlayer,
+    sendVoiceLeave,
+    voiceLooksBroken,
+    waitForBotLeave,
+    waitForTrackStart,
+} from './voiceRecovery.js';
 
 const YOUTUBE_URL_PATTERN = /(?:youtube\.com|youtu\.be)/i;
+
+// How long to wait for Lavalink to confirm a track actually started.
+const PLAYBACK_START_TIMEOUT_MS = 10 * 1000;
+// After a track starts, check that the voice connection to Discord really works.
+const VOICE_HEALTH_CHECK_MS = 8 * 1000;
+const VOICE_HEALTH_MAX_RETRIES = 2;
 
 function getConnectedLavalinkNodes(client) {
     if (!client.riffy?.nodeMap) {
@@ -53,13 +70,177 @@ function assertBotVoicePermissions(channel) {
     }
 }
 
-function startPlayback(player) {
-    Promise.resolve().then(() => player.play()).catch((error) => {
-        logger.error('Lavalink playback start failed:', {
+// True when the player has nothing active and a freshly queued track must be started.
+// (A player flagged "playing" without a loaded track is inconsistent, so start it too.)
+function needsPlaybackStart(player) {
+    if (player.paused) {
+        return false;
+    }
+    return !player.playing || !player.current;
+}
+
+// Starts playback and waits until Lavalink confirms the track really began.
+// Returns false when it failed (no voice connection, dead node, timeout, ...).
+async function tryStartPlayback(client, player) {
+    const started = waitForTrackStart(client, player.guildId, PLAYBACK_START_TIMEOUT_MS);
+
+    try {
+        await player.play();
+    } catch (error) {
+        started.cancel();
+        logger.warn('Lavalink playback start failed:', {
             guildId: player.guildId,
+            node: player.node?.name,
             error: error?.message || error,
         });
+        player.playing = false;
+        return false;
+    }
+
+    const ok = await started.promise;
+    if (!ok) {
+        logger.warn('Lavalink did not confirm track start in time:', {
+            guildId: player.guildId,
+            node: player.node?.name,
+        });
+        player.playing = false;
+    }
+    return ok;
+}
+
+// Tear the player down, leave voice, and open a brand-new connection (on a different
+// node when possible), carrying over the tracks that were waiting to play. Leaving
+// first is what forces Discord to hand out fresh voice credentials - the same thing
+// the "End Session" button used to do by hand.
+async function rebuildPlayer(client, { guildId, voiceChannelId, textChannelId, oldPlayer, keepTracks = true }) {
+    const guildData = getGuildMusicData(guildId);
+    const carry = [];
+
+    if (keepTracks && oldPlayer) {
+        if (oldPlayer.playing && oldPlayer.current) {
+            carry.push(oldPlayer.current);
+        }
+        carry.push(...oldPlayer.queue);
+    }
+
+    const avoidNode = oldPlayer?.node || null;
+
+    if (oldPlayer) {
+        await destroyPlayerSession(client, guildId, oldPlayer, guildData, { forceDisconnect: true });
+    }
+
+    sendVoiceLeave(client, guildId);
+    await waitForBotLeave(client, guildId);
+
+    const fresh = createMusicPlayer(
+        client,
+        { guildId, voiceChannel: voiceChannelId, textChannel: textChannelId, deaf: true },
+        { avoidNode },
+    );
+    guildData.playerChannelId = textChannelId;
+    fresh.setVolume(guildData.volume);
+
+    for (const track of carry) {
+        fresh.queue.add(track);
+    }
+    return fresh;
+}
+
+// Start playback; if it does not come up, rebuild the connection once and retry.
+// Never leaves a half-dead player behind (that is what made songs "only queue").
+async function startPlaybackWithRecovery(client, interaction, player) {
+    if (await tryStartPlayback(client, player)) {
+        scheduleVoiceHealthCheck(client, player);
+        return player;
+    }
+
+    const guildId = player.guildId;
+    logger.warn('Playback did not start; rebuilding the voice connection and retrying once.', { guildId });
+
+    const rebuilt = await rebuildPlayer(client, {
+        guildId,
+        voiceChannelId: interaction.member.voice.channel.id,
+        textChannelId: interaction.channel.id,
+        oldPlayer: player,
     });
+
+    if (await tryStartPlayback(client, rebuilt)) {
+        scheduleVoiceHealthCheck(client, rebuilt);
+        return rebuilt;
+    }
+
+    await destroyPlayerSession(
+        client,
+        guildId,
+        getPlayer(client, guildId),
+        getGuildMusicData(guildId),
+        { forceDisconnect: true },
+    );
+    throw new TitanBotError(
+        'Playback failed',
+        ErrorTypes.CONFIGURATION,
+        'Could not start playback. The music server may be busy - please try again in a moment.',
+    );
+}
+
+function notifyMusicChannel(client, guildData, text) {
+    const channel = guildData.playerChannelId && client.channels.cache.get(guildData.playerChannelId);
+    channel?.send?.(text).catch?.(() => null);
+}
+
+// "Now Playing" with no sound: Lavalink started the track, but its voice connection to
+// Discord is broken (node without DAVE support, voice region problem, ...). A few seconds
+// after playback starts, verify the connection; if it is broken, move the session to a
+// different node automatically - no manual "End Session" needed.
+function scheduleVoiceHealthCheck(client, player, attempt = 0) {
+    const timer = setTimeout(async () => {
+        const guildId = player.guildId;
+        try {
+            if (getPlayer(client, guildId) !== player || !voiceLooksBroken(player)) {
+                return;
+            }
+
+            const guildData = getGuildMusicData(guildId);
+            markNodeBad(player.node);
+            logger.warn('Voice connection is not working; moving to another node.', {
+                guildId,
+                node: player.node?.name,
+                attempt: attempt + 1,
+            });
+
+            if (attempt >= VOICE_HEALTH_MAX_RETRIES) {
+                notifyMusicChannel(client, guildData, 'I joined the voice channel but audio could not be delivered. Please try again in a moment.');
+                await destroyPlayerSession(client, guildId, player, guildData, { forceDisconnect: true });
+                return;
+            }
+
+            const rebuilt = await rebuildPlayer(client, {
+                guildId,
+                voiceChannelId: player.voiceChannel,
+                textChannelId: guildData.playerChannelId || player.textChannel,
+                oldPlayer: player,
+            });
+
+            if (await tryStartPlayback(client, rebuilt)) {
+                scheduleVoiceHealthCheck(client, rebuilt, attempt + 1);
+            } else {
+                notifyMusicChannel(client, guildData, 'Could not restore audio. Please use the play command again.');
+                await destroyPlayerSession(client, guildId, rebuilt, guildData, { forceDisconnect: true });
+            }
+        } catch (error) {
+            logger.warn('Voice health check failed:', { guildId: player.guildId, error: error?.message || error });
+        }
+    }, VOICE_HEALTH_CHECK_MS);
+    timer.unref?.();
+}
+
+// Someone is adding music while the bot is auto-paused (voice channel had been empty).
+async function resumeIfAutoPaused(client, guildId) {
+    const guildData = getGuildMusicData(guildId);
+    if (guildData.autoPaused) {
+        guildData.autoPaused = false;
+        await applyResume(client, guildId);
+    }
 }
 
 export function getPlayer(client, guildId) {
@@ -103,20 +284,56 @@ export async function ensurePlayer(client, interaction) {
 
     const guildId = interaction.guild.id;
     const guildData = getGuildMusicData(guildId);
+    const userChannel = interaction.member.voice.channel;
+    assertBotVoicePermissions(userChannel);
+
     let player = getPlayer(client, guildId);
 
+    if (player) {
+        const idle = !player.playing && !player.paused && !player.queue.length;
+        const inOtherChannel = player.voiceChannel !== userChannel.id;
+
+        // A leftover/dead player (kicked, restarted, node dropped, never connected)
+        // must not be reused, otherwise songs only get queued and never play.
+        if (isPlayerStale(client, player) || (idle && inOtherChannel)) {
+            logger.warn('Replacing stale music player.', { guildId, node: player.node?.name });
+            player = await rebuildPlayer(client, {
+                guildId,
+                voiceChannelId: userChannel.id,
+                textChannelId: interaction.channel.id,
+                oldPlayer: player,
+                keepTracks: !inOtherChannel,
+            });
+        }
+    }
+
     if (!player) {
-        player = client.riffy.createConnection({
-            guildId,
-            voiceChannel: interaction.member.voice.channel.id,
-            textChannel: interaction.channel.id,
-            deaf: true,
-        });
-        guildData.playerChannelId = interaction.channel.id;
+        player = await openFreshPlayer(client, interaction, userChannel);
     }
 
     player.setVolume(guildData.volume);
     return { player, guildData };
+}
+
+// Discord can still list the bot in a voice channel with no player behind it (after a
+// restart or kick). Leave first so the next join receives fresh voice credentials.
+async function openFreshPlayer(client, interaction, channel) {
+    const guildId = interaction.guild.id;
+    const guildData = getGuildMusicData(guildId);
+
+    if (getBotVoiceChannelId(client, guildId)) {
+        sendVoiceLeave(client, guildId);
+        await waitForBotLeave(client, guildId);
+    }
+
+    const player = createMusicPlayer(client, {
+        guildId,
+        voiceChannel: channel.id,
+        textChannel: interaction.channel.id,
+        deaf: true,
+    });
+    guildData.playerChannelId = interaction.channel.id;
+    return player;
 }
 
 function isDuplicateTrack(player, track) {
@@ -140,23 +357,14 @@ export async function joinVoiceChannel(client, interaction) {
     assertBotVoicePermissions(channel);
     let player = getPlayer(client, guildId);
 
-    if (player && player.voiceChannel !== channel.id) {
-        try {
-            player.destroy();
-        } catch {
-            // player may already be gone
-        }
+    if (player && (player.voiceChannel !== channel.id || isPlayerStale(client, player))) {
+        safeDestroyPlayer(client, player);
         player = null;
     }
 
     if (!player) {
-        player = client.riffy.createConnection({
-            guildId,
-            voiceChannel: channel.id,
-            textChannel: interaction.channel.id,
-            deaf: true,
-        });
-        guildData.playerChannelId = interaction.channel.id;
+        assertLavalinkNodeAvailable(client);
+        player = await openFreshPlayer(client, interaction, channel);
     }
 
     player.setVolume(guildData.volume);
@@ -176,7 +384,9 @@ export async function playQuery(client, interaction, query) {
         );
     }
 
-    const { player } = await ensurePlayer(client, interaction);
+    const { player: initialPlayer } = await ensurePlayer(client, interaction);
+    let player = initialPlayer;
+    const guildId = interaction.guild.id;
 
     const result = await client.riffy.resolve({
         query,
@@ -188,6 +398,7 @@ export async function playQuery(client, interaction, query) {
     if (loadType === 'playlist' || loadType === 'PLAYLIST_LOADED') {
         let added = 0;
         let skipped = 0;
+        const shouldStart = needsPlaybackStart(player);
 
         for (const track of tracks) {
             track.info.requester = interaction.user;
@@ -199,8 +410,10 @@ export async function playQuery(client, interaction, query) {
             added += 1;
         }
 
-        if (!player.playing && !player.paused) {
-            await startPlayback(player);
+        if (added > 0 && shouldStart) {
+            player = await startPlaybackWithRecovery(client, interaction, player);
+        } else if (added > 0) {
+            await resumeIfAutoPaused(client, guildId);
         }
 
         return {
@@ -232,12 +445,14 @@ export async function playQuery(client, interaction, query) {
 
         track.info.requester = interaction.user;
 
-        const willPlayNow = !player.playing && !player.paused;
+        const willPlayNow = needsPlaybackStart(player);
         player.queue.add(track);
         const queuePosition = player.queue.length;
 
         if (willPlayNow) {
-            await startPlayback(player);
+            player = await startPlaybackWithRecovery(client, interaction, player);
+        } else {
+            await resumeIfAutoPaused(client, guildId);
         }
 
         return {
@@ -551,9 +766,14 @@ export async function destroyPlayerSession(client, guildId, player, guildData, {
 
     if (player) {
         player.queue.clear();
-        player.stop();
+        try {
+            player.stop();
+        } catch (error) {
+            // node may already be down; destroying the player below still cleans up
+            logger.debug(`Error stopping player for guild ${guildId}: ${error?.message || error}`);
+        }
         if (forceDisconnect || !guildData.twentyFourSeven) {
-            player.destroy();
+            safeDestroyPlayer(client, player);
         }
     }
 }
