@@ -35,12 +35,6 @@
     "name": "Node-Singapura"
   },
   {
-   "host": "free-lava.heavencloud.in",
-   "port": 4000,
-   "password": "heavencloud.in",
-   "secure": false
-  },
-  {
     "name": "NYX-Singapore-1",
     "host": "sg1-nodelink.nyxbot.app",
     "port": 3000,

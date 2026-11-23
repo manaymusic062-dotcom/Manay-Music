@@ -14,6 +14,16 @@ lavalink:
       soundcloud: true
       http: true
       local: false
+    # Audio smoothness (only used when you self-host Lavalink with this file).
+    # A bigger buffer rides out network jitter; lower Opus quality / resampling
+    # costs less CPU, which is what usually causes stuttering on small servers.
+    bufferDurationMs: 800
+    frameBufferDurationMs: 5000
+    opusEncodingQuality: 6
+    resamplingQuality: LOW
+    trackStuckThresholdMs: 10000
+    useSeekGhosting: true
+    playerUpdateInterval: 5
 
 plugins:
   youtube:
